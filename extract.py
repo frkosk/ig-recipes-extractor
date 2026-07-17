@@ -28,6 +28,7 @@ def _load_state() -> dict:
         state = {}
     state.setdefault("processed", {})
     state.setdefault("failed", {})
+    state.setdefault("skipped", {})
     return state
 
 
@@ -94,6 +95,16 @@ def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
         print(f"  ✗ extract failed: {e}")
         return
 
+    if not recipe.is_recipe:
+        state["skipped"][canon] = {
+            "reason": "not a recipe",
+            "name": recipe.name,
+            "attempted_at": _now(),
+        }
+        state["failed"].pop(canon, None)
+        print(f"  ⊘ skipped (not a recipe): {recipe.name}")
+        return
+
     slug, md_path = writer.write_recipe(
         recipe=recipe,
         source_url=canon,
@@ -156,7 +167,7 @@ def main() -> int:
 
     urls = [u for u in urls if u]
     if not args.retry_failed and not args.url:
-        urls = [u for u in urls if u not in state["processed"]]
+        urls = [u for u in urls if u not in state["processed"] and u not in state["skipped"]]
 
     if args.limit:
         urls = urls[: args.limit]
@@ -194,8 +205,9 @@ def main() -> int:
             _save_state(state)
 
     p = len(state["processed"])
+    s = len(state["skipped"])
     f = len(state["failed"])
-    print(f"\nDone. state: {p} processed, {f} failed.")
+    print(f"\nDone. state: {p} processed, {s} skipped (not recipes), {f} failed.")
     return 0
 
 

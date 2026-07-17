@@ -18,7 +18,15 @@ SYSTEM_PROMPT = """Si asistent na extrakciu receptov z Instagram reels a postov.
 
 Vstup: caption z postu + (voliteľne) transkript hovoru z videa + (voliteľne) obrázok jedla.
 
-Úloha: extrahuj recept a zavolaj tool `save_recipe` s výsledkom.
+Úloha: rozhodni či vstup je **recept na jedlo/nápoj** a zavolaj tool `save_recipe`.
+
+Ak vstup NIE JE recept (napr. lifestyle video, fashion, meme, cestovanie, humor, motivačný obsah, tutorial nekulinárny, unboxing, žart, reklama, dokumentárny obsah bez ingrediencií a krokov), vráť:
+- `is_recipe: false`
+- `name`: krátky opis obsahu (napr. "Cestovateľské video z Talianska")
+- `confidence: low`
+- ostatné polia môžu byť prázdne alebo null
+
+Ak vstup JE recept, vráť `is_recipe: true` a normálne vyplň všetky polia podľa nasledujúcich pravidiel.
 
 Pravidlá výstupu:
 - Všetko po slovensky. Ak je zdroj v inom jazyku, prelož názov, ingrediencie, kroky.
@@ -44,7 +52,11 @@ Confidence:
 RECIPE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "name": {"type": "string", "description": "Názov receptu po slovensky."},
+        "is_recipe": {
+            "type": "boolean",
+            "description": "True ak vstup je skutočne recept na jedlo/nápoj; false ak je to čokoľvek iné.",
+        },
+        "name": {"type": "string", "description": "Názov receptu po slovensky (alebo krátky opis obsahu ak is_recipe=false)."},
         "aliases": {
             "type": "array",
             "items": {"type": "string"},
@@ -80,7 +92,7 @@ RECIPE_SCHEMA: dict[str, Any] = {
         "notes": {"type": ["string", "null"]},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
     },
-    "required": ["name", "meal_type", "tags", "ingredients", "steps", "confidence"],
+    "required": ["is_recipe", "name", "meal_type", "tags", "ingredients", "steps", "confidence"],
 }
 
 TOOL_NAME = "save_recipe"
@@ -98,6 +110,7 @@ class RecipeExtract:
     ingredients: list[str]
     steps: list[str]
     confidence: str
+    is_recipe: bool = True
     aliases: list[str] = field(default_factory=list)
     cuisine: str | None = None
     meal_type: list[str] = field(default_factory=list)
@@ -138,6 +151,7 @@ def _to_recipe(payload: dict) -> RecipeExtract:
         ingredients=payload["ingredients"],
         steps=payload["steps"],
         confidence=payload["confidence"],
+        is_recipe=bool(payload.get("is_recipe", True)),
         aliases=payload.get("aliases", []) or [],
         cuisine=payload.get("cuisine"),
         meal_type=payload.get("meal_type", []) or [],
