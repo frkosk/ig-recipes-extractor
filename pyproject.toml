@@ -1,0 +1,14 @@
+[project]
+name = "ig-recipes-extractor"
+version = "0.1.0"
+description = "Extract recipes from Instagram saved reels/posts into an Obsidian markdown library."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.55.0",
+    "mlx-whisper>=0.4.0",
+    "python-slugify>=8.0.4",
+    "python-dotenv>=1.0.1",
+    "yt-dlp>=2026.7.4",
+]
