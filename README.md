@@ -1,8 +1,10 @@
 # ig-recipes-extractor
 
-Pipeline: **Instagram saved reels/posts → Obsidian markdown knižnica**.
+Pipeline: **Instagram saved reels/posts → Obsidian markdown library**.
 
-Stiahne IG reel cez `yt-dlp`, prepíše audio cez `mlx-whisper` (lokálne na Mac), extrahuje štruktúrovaný recept cez LLM tool use (**Anthropic API** alebo **OpenRouter** — prepínateľné cez env) a zapíše do Obsidian vaultu ako `.md` + cover obrázok v `_attachments/`. Automaticky vygeneruje aj `00 Dashboard.md` s Dataview blokmi.
+Downloads an IG reel with `yt-dlp`, transcribes the audio locally with `mlx-whisper` (Apple Silicon), extracts a structured recipe via LLM tool use (**Anthropic API** or **OpenRouter** — swappable via env), and writes it into your Obsidian vault as `.md` + a cover image in `_attachments/`. It also auto-generates `00 Dashboard.md` with Dataview blocks.
+
+Recipe output (name, ingredients, steps, notes) is written in Slovak — the Claude system prompt is authored in SK and instructs the model to translate non-SK sources. If you want a different output language, replace the prompt strings in `lib/extractor.py` and the section headings in `lib/writer.py`.
 
 ## Setup (one-time)
 
@@ -11,97 +13,97 @@ brew install ffmpeg uv
 cd ~/WORK/ig-recipes-extractor
 uv sync
 cp .env.example .env
-# uprav .env: nastav VAULT_RECIPES_DIR a kľúč pre zvolený LLM_PROVIDER
+# edit .env: set VAULT_RECIPES_DIR and the API key for your chosen LLM_PROVIDER
 ```
 
-`yt-dlp` je Python dep (nie brew) — inštaluje sa cez `uv sync`.
+`yt-dlp` is a Python dep (not brew) — it's installed by `uv sync`.
 
 `VAULT_RECIPES_DIR` default:
 `/Users/ferikocurik/Library/Mobile Documents/iCloud~md~obsidian/Documents/Recipies`
 
-V Obsidiane si nainštaluj plugin **Dataview** (Community plugins → Browse → Dataview → Install → Enable), aby `00 Dashboard.md` fungoval. V settings Dataview zapni aj **Enable JavaScript Queries** pre sekciu "Náhodný recept".
+In Obsidian, install the **Dataview** plugin (Community plugins → Browse → Dataview → Install → Enable) so `00 Dashboard.md` renders. In Dataview settings also enable **JavaScript Queries** for the "Random recipe" block.
 
 ## LLM provider
 
-Prepínač `LLM_PROVIDER` v `.env`:
+Switch via `LLM_PROVIDER` in `.env`:
 
 ### `anthropic` (default)
 
-Priamy Anthropic API. Model: `claude-sonnet-4-6` (override cez `ANTHROPIC_MODEL`).
-Vyžaduje `ANTHROPIC_API_KEY`.
-System prompt používa `cache_control: ephemeral` — pri sekvenčnom behu v 5-min TTL okne šetrí input tokens.
+Direct Anthropic API. Model: `claude-sonnet-4-6` (override via `ANTHROPIC_MODEL`).
+Requires `ANTHROPIC_API_KEY`.
+The system prompt uses `cache_control: ephemeral` — with sequential URLs within a 5-minute TTL window, this saves input tokens.
 
 ### `openrouter`
 
-OpenAI-compatible endpoint na `https://openrouter.ai/api/v1`.
-Vyžaduje `OPENROUTER_API_KEY` z https://openrouter.ai/keys.
-Model: default `anthropic/claude-sonnet-4.5` (override cez `OPENROUTER_MODEL`).
+OpenAI-compatible endpoint at `https://openrouter.ai/api/v1`.
+Requires `OPENROUTER_API_KEY` from https://openrouter.ai/keys.
+Model: defaults to `anthropic/claude-sonnet-4.5` (override via `OPENROUTER_MODEL`).
 
-Populárne alternatívy pre `OPENROUTER_MODEL`:
-- `anthropic/claude-sonnet-4.5` — Claude Sonnet 4.5 cez OpenRouter (dobrá kvalita, tool use)
-- `openai/gpt-4o-mini` — lacný, rýchly, decentný na SK
-- `google/gemini-2.5-flash` — veľmi lacný, dobrý pri image inputs
-- `deepseek/deepseek-chat` — najlacnejší, kvalita na tomto usecase kolíše
+Popular `OPENROUTER_MODEL` alternatives:
+- `anthropic/claude-sonnet-4.5` — Claude Sonnet 4.5 via OpenRouter (good quality, reliable tool use)
+- `openai/gpt-4o-mini` — cheap, fast, decent on SK
+- `google/gemini-2.5-flash` — very cheap, strong image input support
+- `deepseek/deepseek-chat` — cheapest, quality is inconsistent for this use case
 
-Zoznam všetkých modelov: https://openrouter.ai/models. **Model musí podporovať `tools` (function calling)**, inak extrakcia zlyhá.
+Full model list: https://openrouter.ai/models. **The model must support `tools` (function calling)**, otherwise extraction will fail.
 
-Voliteľné hlavičky pre OpenRouter ranking (nie sú povinné):
+Optional headers for OpenRouter's app ranking (not required):
 - `OPENROUTER_HTTP_REFERER`
 - `OPENROUTER_APP_TITLE`
 
 ## Cookies (IG login)
 
-IG dnes takmer vždy žiada session pri s­ťahovaní reels. Nastav v `.env` jedno z:
+IG almost always requires a session when downloading reels. Set one of these in `.env`:
 
 ```
-IG_COOKIES_FROM_BROWSER=chrome   # alebo brave/firefox/safari/edge/opera
-IG_COOKIES_FILE=cookies.txt      # relatívne k project rootu, alebo abs. cesta / ~
+IG_COOKIES_FROM_BROWSER=chrome   # or brave/firefox/safari/edge/opera
+IG_COOKIES_FILE=cookies.txt      # relative to project root, or abs path / ~
 ```
 
-Export cookies do súboru: v Chrome/Brave/Firefox nainštaluj extension **Get cookies.txt LOCALLY**, na instagram.com klikni ikonu → Export Netscape → hoď do project rootu ako `cookies.txt`.
+Cookie file export: in Chrome/Brave/Firefox install the **Get cookies.txt LOCALLY** extension, open instagram.com, click the extension icon → Export Netscape → drop the file into the project root as `cookies.txt`.
 
-## Manual IG data export (každý batch)
+## Manual IG data export (per batch)
 
-1. IG appka → **Settings → Accounts Center → Your information and permissions → Download your information**
-2. **Some of your information → Saved → Include** (nič iné netreba)
+1. IG app → **Settings → Accounts Center → Your information and permissions → Download your information**
+2. **Some of your information → Saved → Include** (nothing else needed)
 3. Format: **JSON**, Date range: **All time**
-4. Počkať 24–48h na email od IG
-5. Stiahnuť ZIP, hodiť do `inbox/`
+4. Wait 24–48h for the email from IG
+5. Download the ZIP, drop it into `inbox/`
 6. `uv run extract.py`
 
-Skript automaticky:
-- vezme najnovší ZIP z `inbox/`
-- vyfiltruje URL, ktoré už v `state.json` sú spracované
-- spracuje len prírastky
-- zapíše `.md` súbory + `_attachments/*.jpg` do vaultu
-- pri prvom behu vo vaulte vytvorí `00 Dashboard.md`
+The script automatically:
+- Picks the latest ZIP in `inbox/`
+- Filters URLs already recorded in `state.json`
+- Processes only new ones
+- Writes `.md` files + `_attachments/*.jpg` into the vault
+- On first run in a vault, creates `00 Dashboard.md`
 
 ## CLI
 
 ```bash
-uv run extract.py                          # najnovší ZIP z inbox/
-uv run extract.py --zip path/to/export.zip # konkrétny ZIP
-uv run extract.py --url https://www.instagram.com/reel/XYZ/  # jeden URL (test)
-uv run extract.py --retry-failed           # retry všetkých z state.failed
-uv run extract.py --dry-run                # ukáž URL, nič nezapisuj
-uv run extract.py --limit 3                # obmedzenie na prvé 3 URL
+uv run extract.py                          # latest ZIP in inbox/
+uv run extract.py --zip path/to/export.zip # specific ZIP
+uv run extract.py --url https://www.instagram.com/reel/XYZ/  # single URL (for testing)
+uv run extract.py --retry-failed           # retry every URL in state.failed
+uv run extract.py --dry-run                # list URLs, write nothing
+uv run extract.py --limit 3                # cap to first N URLs
 ```
 
-## Štruktúra výstupu
+## Output layout
 
 ```
 <VAULT_RECIPES_DIR>/
 ├── 00 Dashboard.md               # auto-generated, Dataview
 ├── Belgická cibuľová omáčka.md
 ├── Pumpkin Cookies.md
-└── _attachments/                 # skryté v Obsidian sidebar (`_` prefix)
+└── _attachments/                 # hidden in Obsidian sidebar (`_` prefix)
     ├── Belgická cibuľová omáčka.jpg
     └── ...
 ```
 
-Súbory sú pomenované ľudsky (unicode + medzery), sanitized len `/`, `\`, `:`, control chars. Attachments folder `_attachments/` je skrytý cez Obsidian filter na `_`-prefix.
+Filenames use the recipe title as-is (unicode + spaces preserved); only `/`, `\`, `:`, and control chars are sanitized to `-`. The `_attachments/` folder is hidden in Obsidian via the `_`-prefix filter.
 
-### Frontmatter recept-noty
+### Recipe note frontmatter
 
 ```yaml
 name: "Belgická cibuľová omáčka"
@@ -121,40 +123,40 @@ confidence: high                  # high | medium | low
 extracted: 2026-07-17
 ```
 
-Nested tagy sú stavané zo štruktúrovaných polí:
+Nested tags are derived from the structured fields:
 - `kuchyna/{cuisine}`
-- `chod/{meal_type[i]}` (jeden per meal_type entry)
+- `chod/{meal_type[i]}` (one per meal_type entry)
 - `narocnost/{difficulty}`
-- `ingr/{main_ingredient}` (slug)
-- `styl/{tag}` — pre voľné štýlové tagy (rychle, vegetarian, ...)
+- `ingr/{main_ingredient}` (slugged)
+- `styl/{tag}` — for free-form style tags (rychle, vegetarian, …)
 
-Recepty s `confidence: low` dostanú navyše tag `kontrola-potrebna`.
+Recipes with `confidence: low` also get a `kontrola-potrebna` tag.
 
-Telo obsahuje sekcie **Ingrediencie / Postup / Poznámky / Podobné**, s auto-wikilinkom na `main_ingredient` v hlavičke aj v položkách ingrediencií (word-boundary aware pre deklináciu — `cesnaku` linkuje na `[[Cesnak|cesnaku]]`).
+The body has sections **Ingrediencie / Postup / Poznámky / Podobné**, with an auto-wikilink on `main_ingredient` both in the header and in ingredient list items (word-boundary aware for declension — e.g. `cesnaku` links as `[[Cesnak|cesnaku]]`).
 
 ## Dashboard (`00 Dashboard.md`)
 
-Vytvorí sa raz pri prvom non-dry-run behu. Obsahuje Dataview bloky:
-- Rýchle recepty (≤ 30 min)
-- Podľa kuchyne
-- Podľa hlavnej ingrediencie
-- Podľa chodu
-- Potrebuje kontrolu (confidence low)
-- Náhodný recept (`dataviewjs` — vyžaduje Enable JavaScript Queries)
+Created once on the first non-dry-run invocation. Contains Dataview blocks:
+- Quick recipes (≤ 30 min)
+- By cuisine
+- By main ingredient
+- By course
+- Needs review (confidence low)
+- Random recipe (`dataviewjs` — requires Enable JavaScript Queries)
 
-Queries používajú `WHERE file.folder = this.file.folder` → nezávisia od toho kde je vault root.
+Queries use `WHERE file.folder = this.file.folder` so they work regardless of where the vault root is.
 
 ## State (`state.json`)
 
-Dedup záznam. Git-trackovaný.
+Dedup ledger. Git-ignored (each machine keeps its own).
 
 ```json
 {
   "processed": {
     "https://www.instagram.com/p/XYZ": {
-      "slug": "Recept",
+      "slug": "Recipe",
       "extracted_at": "2026-07-17T11:55:44+00:00",
-      "vault_file": "Recept.md",
+      "vault_file": "Recipe.md",
       "confidence": "high"
     }
   },
@@ -167,9 +169,9 @@ Dedup záznam. Git-trackovaný.
 }
 ```
 
-Failed URL môžeš skúsiť znova cez `--retry-failed`. Pri úspechu sa presunie z `failed` do `processed`.
+Failed URLs can be retried with `--retry-failed`. A successful retry moves the entry from `failed` to `processed`.
 
-## Súborová štruktúra projektu
+## Project layout
 
 ```
 extract.py               # CLI entrypoint
@@ -179,21 +181,21 @@ lib/
 ├── transcriber.py       # ffmpeg → mlx-whisper
 ├── extractor.py         # Anthropic/OpenRouter tool-use extraction
 └── writer.py            # md rendering, dashboard bootstrap
-inbox/                   # user drops IG export ZIP here (gitignored)
+inbox/                   # user drops the IG export ZIP here (gitignored)
 work/                    # temp video/audio/transcript (gitignored)
-state.json               # dedup state (tracked)
+state.json               # dedup state (gitignored)
 .env                     # LLM key, vault path, cookies (gitignored)
 cookies.txt              # IG session (gitignored)
 ```
 
 ## Troubleshooting
 
-- **`yt-dlp: Instagram sent an empty media response`** → IG žiada login. Nastav `IG_COOKIES_FROM_BROWSER=chrome` alebo `IG_COOKIES_FILE=cookies.txt` v `.env`. Pri `--cookies-from-browser chrome` musí byť Chrome zavretý (SQLite lock).
-- **`yt-dlp timed out after 300s`** → sieť pomalá alebo IG throttluje. Znova cez `--retry-failed`.
-- **`yt-dlp: private post`** → post medzitým prešiel na private/deleted. `--retry-failed` nezachráni.
-- **`No module named expat`** → brew yt-dlp broken build. My používame pip yt-dlp cez `uv` — nemal by byť problém, ale ak áno `uv sync` znova.
-- **Whisper stiahne ~1.5GB model pri prvom behu** — normal, cache v `~/.cache/huggingface/`.
-- **`VAULT_RECIPES_DIR not set`** → doplň do `.env`.
-- **OpenRouter: `no save_recipe tool call`** → zvolený model nemá tool/function calling support alebo ho odmietol vrátiť. Prepni model na Claude/GPT-4o/Gemini 2.5.
-- **Dashboard prázdny "No results to show"** → Dataview plugin nie je enabled, alebo `Cmd+P` → **Dataview: Force refresh all views**.
-- **Confidence low u viacerých** → zdroj má recept len v pinned komentári / obrázku. Thumbnail image sa už posiela do Claude ako vision input, ale niekedy tam nič nie je.
+- **`yt-dlp: Instagram sent an empty media response`** → IG wants a login. Set `IG_COOKIES_FROM_BROWSER=chrome` or `IG_COOKIES_FILE=cookies.txt` in `.env`. With `--cookies-from-browser chrome` Chrome must be closed (SQLite lock on cookie DB).
+- **`yt-dlp timed out after 300s`** → slow network or IG throttling. Try again via `--retry-failed`.
+- **`yt-dlp: private post`** → the post went private/deleted after you saved it. `--retry-failed` won't help.
+- **`No module named expat`** → brew's yt-dlp build is broken. We use the pip yt-dlp installed via `uv`; run `uv sync` to make sure the venv is populated.
+- **Whisper downloads ~1.5GB on first run** — normal, model cache lives in `~/.cache/huggingface/`.
+- **`VAULT_RECIPES_DIR not set`** → add it to `.env`.
+- **OpenRouter: `no save_recipe tool call`** → the chosen model doesn't support tool/function calling, or refused to return one. Switch to Claude / GPT-4o / Gemini 2.5.
+- **Dashboard shows "No results to show"** → Dataview plugin isn't enabled, or trigger `Cmd+P` → **Dataview: Force refresh all views**.
+- **Many recipes come out with low confidence** → the source only has the recipe in a pinned comment or on-screen text. Thumbnails are already sent as vision input, but sometimes there's nothing useful there.
