@@ -36,7 +36,10 @@ def _save_state(state: dict) -> None:
 
 
 def _canonicalize(url: str) -> str:
-    return url.split("?")[0].rstrip("/")
+    u = url.split("?")[0].split("#")[0].rstrip("/")
+    # normalize /reel/ /reels/ /p/ /tv/ to /p/ so the same shortcode isn't seen twice
+    u = re.sub(r"/(?:reel|reels|tv)/", "/p/", u)
+    return u
 
 
 def _post_id(url: str) -> str:

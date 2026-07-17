@@ -54,8 +54,18 @@ def _extract_posts(data: dict | list) -> Iterator[SavedPost]:
     else:
         entries = data
     for entry in entries:
-        smd = entry.get("string_map_data") or {}
-        saved = smd.get("Saved on") or {}
-        href = saved.get("href")
-        if href:
-            yield SavedPost(url=href)
+        # Newer schema (2025+): entry has `label_values` list with objects
+        # {label, value, href}. URL entry is label=="URL".
+        for lv in entry.get("label_values") or []:
+            if lv.get("label") == "URL":
+                href = lv.get("href") or lv.get("value")
+                if href:
+                    yield SavedPost(url=href)
+                    break
+        else:
+            # Older schema: `string_map_data.Saved on.href`
+            smd = entry.get("string_map_data") or {}
+            saved = smd.get("Saved on") or {}
+            href = saved.get("href")
+            if href:
+                yield SavedPost(url=href)
