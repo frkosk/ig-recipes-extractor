@@ -122,10 +122,10 @@ def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
     print(f"  ✓ {recipe.name} → {md_path.name} (confidence={recipe.confidence})")
 
 
-def _urls_from_zip(zip_path: Path) -> list[str]:
+def _urls_from_zip(zip_path: Path, collection: str | None) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
-    for post in ig_parser.iter_saved_posts_from_zip(zip_path):
+    for post in ig_parser.iter_saved_posts_from_zip(zip_path, collection=collection):
         c = _canonicalize(post.url)
         if c not in seen:
             seen.add(c)
@@ -141,6 +141,11 @@ def main() -> int:
     g.add_argument("--zip", type=Path, help="Path to IG data export zip")
     g.add_argument("--url", type=str, help="Single URL (ad-hoc)")
     g.add_argument("--retry-failed", action="store_true")
+    g.add_argument("--list-collections", action="store_true", help="Print collections in the ZIP and exit")
+    ap.add_argument(
+        "--collection", type=str, default="Recipes",
+        help="IG saved-collection name to filter by. Use '*' to include all saved posts. Default: 'Recipes'.",
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=None, help="Cap number of URLs processed")
     args = ap.parse_args()
@@ -153,6 +158,16 @@ def main() -> int:
         if dash:
             print(f"Created dashboard: {dash.name}")
 
+    if args.list_collections:
+        zip_path = args.zip or ig_parser.find_latest_export(INBOX)
+        if not zip_path:
+            print(f"No zip in {INBOX} and --zip not given.", file=sys.stderr)
+            return 2
+        print(f"Collections in {zip_path.name}:")
+        for name, count in ig_parser.list_collections(zip_path):
+            print(f"  {count:4}  {name}")
+        return 0
+
     if args.url:
         urls = [args.url]
     elif args.retry_failed:
@@ -163,7 +178,9 @@ def main() -> int:
             print(f"No zip in {INBOX} and --zip not given.", file=sys.stderr)
             return 2
         print(f"Using export: {zip_path.name}")
-        urls = _urls_from_zip(zip_path)
+        coll = None if args.collection == "*" else args.collection
+        print(f"Collection: {coll or '(all saved)'}")
+        urls = _urls_from_zip(zip_path, collection=coll)
 
     urls = [u for u in urls if u]
     if not args.retry_failed and not args.url:
