@@ -73,7 +73,8 @@ Cookie file export: in Chrome/Brave/Firefox install the **Get cookies.txt LOCALL
 
 The script automatically:
 - Picks the latest ZIP in `inbox/`
-- Filters URLs already recorded in `state.json`
+- Takes only posts from the IG saved collection **Recipes** (override with `--collection`, see below)
+- Filters URLs already recorded in `state.json` (processed or skipped)
 - Processes only new ones
 - Writes `.md` files + `_attachments/*.jpg` into the vault
 - On first run in a vault, creates `00 Dashboard.md`
@@ -87,7 +88,16 @@ uv run extract.py --url https://www.instagram.com/reel/XYZ/  # single URL (for t
 uv run extract.py --retry-failed           # retry every URL in state.failed
 uv run extract.py --dry-run                # list URLs, write nothing
 uv run extract.py --limit 3                # cap to first N URLs
+uv run extract.py --list-collections       # print saved collections (with post counts) in the ZIP and exit
+uv run extract.py --collection "Dinner"    # use a different saved collection (case-insensitive)
+uv run extract.py --collection '*'         # all saved posts, regardless of collection
 ```
+
+`--collection` defaults to `Recipes`. If the named collection doesn't exist in the export, the run aborts — use `--list-collections` to see what's there. `--url` and `--retry-failed` ignore the collection filter and the dedup ledger.
+
+## Non-recipe posts
+
+The LLM first decides whether the post is actually a recipe (`is_recipe`). Non-recipe content (lifestyle, memes, travel, ads, …) is not written to the vault; it's recorded under `skipped` in `state.json` and won't be retried on later runs.
 
 ## Output layout
 
@@ -165,11 +175,20 @@ Dedup ledger. Git-ignored (each machine keeps its own).
       "reason": "download: yt-dlp failed (1): ...",
       "attempted_at": "2026-07-17T12:01:22+00:00"
     }
+  },
+  "skipped": {
+    "https://www.instagram.com/p/DEF": {
+      "reason": "not a recipe",
+      "name": "Cestovateľské video z Talianska",
+      "attempted_at": "2026-07-17T12:03:10+00:00"
+    }
   }
 }
 ```
 
-Failed URLs can be retried with `--retry-failed`. A successful retry moves the entry from `failed` to `processed`.
+Failed URLs can be retried with `--retry-failed`. A successful retry moves the entry from `failed` to `processed` (or `skipped`). URLs in `skipped` are never reprocessed automatically; delete the entry from `state.json` (or use `--url`) to force a re-run.
+
+URLs are canonicalized before being stored: query string and trailing slash are dropped, and `/reel/`, `/reels/`, `/tv/` are rewritten to `/p/`, so the same post saved via different links is processed once.
 
 ## Project layout
 
