@@ -289,3 +289,46 @@ def write_recipe(
         shutil.copy2(thumbnail_path, attachments / f"{filename}.jpg")
 
     return filename, md_path
+
+
+BACKLOG_FILENAME = "00 Backlog.md"
+
+
+def _excerpt(text: str, limit: int = 160) -> str:
+    one_line = " ".join(text.split())
+    return one_line if len(one_line) <= limit else one_line[: limit - 1] + "…"
+
+
+def write_backlog(recipes_dir: Path, state: dict, captions: dict[str, str]) -> Path:
+    """Regenerate the backlog note from state: failed posts + low-confidence recipes."""
+    recipes_dir.mkdir(parents=True, exist_ok=True)
+    failed = sorted(state.get("failed", {}).items(), key=lambda kv: kv[1].get("attempted_at", ""), reverse=True)
+    low = sorted(
+        (kv for kv in state.get("processed", {}).items() if kv[1].get("confidence") == "low"),
+        key=lambda kv: kv[1].get("extracted_at", ""),
+        reverse=True,
+    )
+
+    lines = [
+        "# Backlog",
+        "",
+        f"*Generované automaticky ({date.today().isoformat()}) zo `state.json` — ručné úpravy sa prepíšu.*",
+        "",
+        f"## Nespracované ({len(failed)})",
+        "",
+    ]
+    for url, info in failed:
+        lines.append(f"- [{url.rstrip('/').rsplit('/', 1)[-1]}]({url}) — {info.get('attempted_at', '')[:10]}")
+        reason = re.sub(r"; please report this issue.*?(?=; caption has no recipe|$)", "", info.get("reason", ""), flags=re.S)
+        lines.append(f"    - Dôvod: `{_excerpt(reason, 200)}`")
+        if caption := captions.get(url):
+            lines.append(f"    - Popis: {_excerpt(caption)}")
+    lines += ["", f"## Na kontrolu — nízka istota ({len(low)})", ""]
+    for url, info in low:
+        note = Path(info.get("vault_file", "")).stem
+        lines.append(f"- [[{note}]] — [Instagram]({url})")
+    lines.append("")
+
+    path = recipes_dir / BACKLOG_FILENAME
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path

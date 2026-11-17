@@ -95,6 +95,18 @@ uv run extract.py --collection '*'         # all saved posts, regardless of coll
 
 `--collection` defaults to `Recipes`. If the named collection doesn't exist in the export, the run aborts — use `--list-collections` to see what's there. `--url` and `--retry-failed` ignore the collection filter and the dedup ledger.
 
+## Photo / carousel posts
+
+yt-dlp can't download posts without video (`No video formats found!`). In that case the pipeline falls back to the caption from the IG export (`Titulok`/`Caption`) and extracts the recipe from text only (no transcript, no cover image). If the caption doesn't contain a recipe, the post goes to the backlog.
+
+## Backlog (`00 Backlog.md`)
+
+Regenerated in the vault after every non-dry run from `state.json`:
+- **Nespracované** — everything in `failed`, with the reason and a caption excerpt
+- **Na kontrolu** — processed recipes with `confidence: low`
+
+Manual edits are overwritten.
+
 ## Non-recipe posts
 
 The LLM first decides whether the post is actually a recipe (`is_recipe`). Non-recipe content (lifestyle, memes, travel, ads, …) is not written to the vault; it's recorded under `skipped` in `state.json` and won't be retried on later runs.
@@ -167,7 +179,8 @@ Dedup ledger. Git-ignored (each machine keeps its own).
       "slug": "Recipe",
       "extracted_at": "2026-07-17T11:55:44+00:00",
       "vault_file": "Recipe.md",
-      "confidence": "high"
+      "confidence": "high",
+      "source": "download"            // or "export caption" (fallback)
     }
   },
   "failed": {

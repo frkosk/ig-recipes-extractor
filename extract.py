@@ -59,7 +59,7 @@ def _vault_dir() -> Path:
     return Path(env).expanduser()
 
 
-def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
+def _process_url(url: str, state: dict, vault: Path, dry_run: bool, export_caption: str = "") -> None:
     canon = _canonicalize(url)
     pid = _post_id(canon)
     print(f"→ {canon}")
@@ -71,9 +71,18 @@ def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
     try:
         dl = downloader.download(canon, WORK, pid)
     except downloader.DownloadError as e:
-        state["failed"][canon] = {"reason": f"download: {e}", "attempted_at": _now()}
-        print(f"  ✗ download failed: {e}")
-        return
+        if not export_caption:
+            state["failed"][canon] = {"reason": f"download: {e}", "attempted_at": _now()}
+            print(f"  ✗ download failed: {e}")
+            return
+        # Photo/carousel posts often fail in yt-dlp; the export still has the caption.
+        print(f"  ⚠ download failed, falling back to export caption ({len(export_caption)} chars)")
+        dl = downloader.DownloadResult(
+            video_path=None, thumbnail_path=None, caption=export_caption, uploader="",
+        )
+        download_error = str(e)
+    else:
+        download_error = ""
 
     transcript_text = ""
     if dl.video_path:
@@ -91,8 +100,20 @@ def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
             image_path=dl.thumbnail_path,
         )
     except Exception as e:
-        state["failed"][canon] = {"reason": f"extract: {e}", "attempted_at": _now()}
+        reason = f"extract: {e}"
+        if download_error:
+            reason = f"download: {download_error}; {reason}"
+        state["failed"][canon] = {"reason": reason, "attempted_at": _now()}
         print(f"  ✗ extract failed: {e}")
+        return
+
+    if not recipe.is_recipe and download_error:
+        # Caption alone wasn't enough — keep it in the backlog, not in skipped.
+        state["failed"][canon] = {
+            "reason": f"download: {download_error}; caption has no recipe",
+            "attempted_at": _now(),
+        }
+        print(f"  ✗ caption has no recipe: {recipe.name}")
         return
 
     if not recipe.is_recipe:
@@ -117,6 +138,7 @@ def _process_url(url: str, state: dict, vault: Path, dry_run: bool) -> None:
         "extracted_at": _now(),
         "vault_file": md_path.name,
         "confidence": recipe.confidence,
+        "source": "export caption" if download_error else "download",
     }
     state["failed"].pop(canon, None)
     print(f"  ✓ {recipe.name} → {md_path.name} (confidence={recipe.confidence})")
@@ -168,6 +190,12 @@ def main() -> int:
             print(f"  {count:4}  {name}")
         return 0
 
+    captions: dict[str, str] = {}
+    if export_zip := args.zip or ig_parser.find_latest_export(INBOX):
+        captions = {
+            _canonicalize(u): c for u, c in ig_parser.captions_from_zip(export_zip).items()
+        }
+
     if args.url:
         urls = [args.url]
     elif args.retry_failed:
@@ -205,7 +233,7 @@ def main() -> int:
     try:
         for url in urls:
             try:
-                _process_url(url, state, vault, args.dry_run)
+                _process_url(url, state, vault, args.dry_run, captions.get(_canonicalize(url), ""))
             except KeyboardInterrupt:
                 raise
             except Exception:
@@ -220,6 +248,8 @@ def main() -> int:
     finally:
         if not args.dry_run:
             _save_state(state)
+            backlog = writer.write_backlog(vault, state, captions)
+            print(f"Backlog: {backlog.name}")
 
     p = len(state["processed"])
     s = len(state["skipped"])

@@ -12,6 +12,7 @@ from typing import Iterator
 @dataclass
 class SavedPost:
     url: str
+    caption: str = ""
 
 
 def find_latest_export(inbox: Path) -> Path | None:
@@ -32,8 +33,8 @@ def list_collections(zip_path: Path) -> list[tuple[str, int]]:
                 continue
             for coll in data:
                 cname = _collection_name(coll)
-                urls = list(_collection_urls(coll))
-                result.append((cname, len(urls)))
+                posts = list(_collection_posts(coll))
+                result.append((cname, len(posts)))
     return result
 
 
@@ -60,8 +61,7 @@ def iter_saved_posts_from_zip(
                 for coll in data:
                     if _collection_name(coll).lower() == collection.lower():
                         found = True
-                        for url in _collection_urls(coll):
-                            yield SavedPost(url=url)
+                        yield from _collection_posts(coll)
             if not found:
                 raise ValueError(f"Collection {collection!r} not found in {zip_path.name}")
             return
@@ -89,34 +89,84 @@ def iter_saved_posts_from_zip(
             )
 
 
+# The export localizes labels to the account language (e.g. SK "Meno").
+COLLECTION_NAME_LABELS = {"Name", "Meno"}
+
+
+def _fix_mojibake(s: str) -> str:
+    """IG exports write UTF-8 bytes as latin-1 code points; undo that."""
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
 def _collection_name(coll: dict) -> str:
     for lv in coll.get("label_values") or []:
-        if lv.get("label") == "Name":
-            return lv.get("value") or "?"
+        if lv.get("label") in COLLECTION_NAME_LABELS:
+            return _fix_mojibake(lv.get("value") or "?")
     return "?"
 
 
-def _collection_urls(coll: dict) -> Iterator[str]:
-    """Walk the nested dict-of-dicts structure inside a collection entry to yield post URLs."""
+def _collection_posts(coll: dict) -> Iterator[SavedPost]:
+    """Walk the nested dict-of-dicts structure inside a collection entry to yield posts."""
     for lv in coll.get("label_values") or []:
-        for post in _walk_for_urls(lv):
-            yield post
+        yield from _walk_for_posts(lv)
 
 
 IG_POST_URL_PREFIX = "https://www.instagram.com/"
+CAPTION_LABELS = {"Caption", "Titulok"}
 
 
-def _walk_for_urls(node) -> Iterator[str]:
-    if isinstance(node, dict):
-        if node.get("label") == "URL":
-            u = node.get("href") or node.get("value")
-            if u and isinstance(u, str) and u.startswith(IG_POST_URL_PREFIX):
-                yield u
-        for v in node.values():
-            yield from _walk_for_urls(v)
-    elif isinstance(node, list):
+def _post_from_fields(fields: list) -> SavedPost | None:
+    """Build a post from sibling {label, value, href} entries (URL + caption)."""
+    url = caption = None
+    for f in fields:
+        if not isinstance(f, dict):
+            continue
+        if f.get("label") == "URL" and url is None:
+            u = f.get("href") or f.get("value")
+            if isinstance(u, str) and u.startswith(IG_POST_URL_PREFIX):
+                url = u
+        elif f.get("label") in CAPTION_LABELS and caption is None:
+            caption = f.get("value")
+    if not url:
+        return None
+    return SavedPost(url=url, caption=_fix_mojibake(caption) if caption else "")
+
+
+def _walk_for_posts(node) -> Iterator[SavedPost]:
+    if isinstance(node, list):
+        post = _post_from_fields(node)
+        if post:
+            yield post
+            return
         for item in node:
-            yield from _walk_for_urls(item)
+            yield from _walk_for_posts(item)
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from _walk_for_posts(v)
+
+
+def captions_from_zip(zip_path: Path) -> dict[str, str]:
+    """Map post URL → caption across saved posts and all collections."""
+    result: dict[str, str] = {}
+    for post in iter_saved_posts_from_zip(zip_path):
+        if post.caption:
+            result[post.url] = post.caption
+    with zipfile.ZipFile(zip_path) as zf:
+        for name in zf.namelist():
+            if not name.endswith("saved_collections.json"):
+                continue
+            with zf.open(name) as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                continue
+            for coll in data:
+                for post in _collection_posts(coll):
+                    if post.caption:
+                        result.setdefault(post.url, post.caption)
+    return result
 
 
 def _extract_posts(data: dict | list) -> Iterator[SavedPost]:
@@ -131,12 +181,9 @@ def _extract_posts(data: dict | list) -> Iterator[SavedPost]:
     for entry in entries:
         # Newer schema (2025+): entry has `label_values` list with objects
         # {label, value, href}. URL entry is label=="URL".
-        for lv in entry.get("label_values") or []:
-            if lv.get("label") == "URL":
-                href = lv.get("href") or lv.get("value")
-                if href:
-                    yield SavedPost(url=href)
-                    break
+        post = _post_from_fields(entry.get("label_values") or [])
+        if post:
+            yield post
         else:
             # Older schema: `string_map_data.Saved on.href`
             smd = entry.get("string_map_data") or {}
