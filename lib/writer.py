@@ -299,6 +299,15 @@ def _excerpt(text: str, limit: int = 160) -> str:
     return one_line if len(one_line) <= limit else one_line[: limit - 1] + "…"
 
 
+# Captions are third-party text: neutralize Markdown/HTML/Obsidian syntax
+# (`$=` inline Dataview JS, [[links]], ![[embeds]], <html>, %%comments%%).
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>!|#$%=~{}])")
+
+
+def _escape_md(text: str) -> str:
+    return _MD_SPECIAL.sub(r"\\\1", text)
+
+
 def write_backlog(recipes_dir: Path, state: dict, captions: dict[str, str]) -> Path:
     """Regenerate the backlog note from state: failed posts + low-confidence recipes."""
     recipes_dir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +331,7 @@ def write_backlog(recipes_dir: Path, state: dict, captions: dict[str, str]) -> P
         reason = re.sub(r"; please report this issue.*?(?=; caption has no recipe|$)", "", info.get("reason", ""), flags=re.S)
         lines.append(f"    - Dôvod: `{_excerpt(reason, 200)}`")
         if caption := captions.get(url):
-            lines.append(f"    - Popis: {_excerpt(caption)}")
+            lines.append(f"    - Popis: {_escape_md(_excerpt(caption))}")
     lines += ["", f"## Na kontrolu — nízka istota ({len(low)})", ""]
     for url, info in low:
         note = Path(info.get("vault_file", "")).stem
